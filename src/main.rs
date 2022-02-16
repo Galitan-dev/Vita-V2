@@ -9,13 +9,16 @@ use winit::{
 
 mod texture;
 
+// Repetive parts are simplified with this macro
 macro_rules! vertex {
+    // Manually set texture coordinates
     ( $x:expr, $y:expr, $tex_x:expr, $tex_y:expr ) => {
         Vertex {
             position: [$x, $y, 0.0],
             tex_coords: [$tex_x, 1.0 - $tex_y],
         }
     };
+    // Automatically calculate the texture coordinates from scale and position
     ( $x:expr, $y:expr, $off_x:expr, $off_y:expr, $scale: expr ) => {
         vertex!(
             $x,
@@ -26,6 +29,7 @@ macro_rules! vertex {
     };
 }
 
+// A simple shape of three triangles
 const VERTICES: &[Vertex] = &[
     vertex!(-0.0868241, 0.49240386, 0.4131759, 0.99240386),
     vertex!(-0.49513406, 0.06958647, 0.0048659444, 0.56958647),
@@ -33,12 +37,14 @@ const VERTICES: &[Vertex] = &[
     vertex!(0.35966998, -0.3473291, 0.85967, 0.1526709),
     vertex!(0.44147372, 0.2347359, 0.9414737, 0.7347359),
 ];
-
+// Save duplicated data
 const INDICES: &[u16] = &[0, 1, 4, 1, 2, 4, 2, 3, 4];
 
+// Texture configuration
 const OFFSET_X: f32 = 0.0;
 const OFFSET_Y: f32 = -0.4;
 const SCALE: f32 = 1.2;
+// A complicated shape of about ten triangles
 const CAT_VERTICES: &[Vertex] = &[
     vertex!(-0.4, 0.8, OFFSET_X, OFFSET_Y, SCALE),
     vertex!(-0.4, 0.6, OFFSET_X, OFFSET_Y, SCALE),
@@ -58,11 +64,12 @@ const CAT_VERTICES: &[Vertex] = &[
     vertex!(0.7, -0.35, OFFSET_X, OFFSET_Y, SCALE),
     vertex!(0.65, -0.2, OFFSET_X, OFFSET_Y, SCALE),
 ];
-
+// Also save duplicated data
 const CAT_INDICES: &[u16] = &[
     0, 1, 2, 3, 5, 4, 1, 6, 4, 4, 6, 7, 8, 9, 10, 8, 10, 11, 11, 10, 12, 13, 12, 14, 16, 15, 14,
 ];
 
+// The object that is sent to the shader
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 struct Vertex {
@@ -70,6 +77,7 @@ struct Vertex {
     tex_coords: [f32; 2],
 }
 
+// The vector layout for wgpu
 impl Vertex {
     fn desc<'a>() -> wgpu::VertexBufferLayout<'a> {
         wgpu::VertexBufferLayout {
@@ -91,20 +99,54 @@ impl Vertex {
     }
 }
 
+// Wgpu does not appear to be normal
+#[rustfmt::skip]
+pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::new(
+    1.0, 0.0, 0.0, 0.0,
+    0.0, 1.0, 0.0, 0.0,
+    0.0, 0.0, 0.5, 0.0,
+    0.0, 0.0, 0.5, 1.0,
+);
+
+// To manipulate the viewpoint
+struct Camera {
+    eye: cgmath::Point3<f32>,
+    target: cgmath::Point3<f32>,
+    up: cgmath::Vector3<f32>,
+    aspect: f32,
+    fovy: f32,
+    znear: f32,
+    zfar: f32,
+}
+
+impl Camera {
+    fn build_view_projection_matrix(&self) -> cgmath::Matrix4<f32> {
+        // Camera Position & Rotation
+        let view = cgmath::Matrix4::look_at_rh(self.eye, self.target, self.up);
+        // Perspective
+        let proj = cgmath::perspective(cgmath::Deg(self.fovy), self.aspect, self.znear, self.zfar);
+        // Wgpu coordinate system
+        return OPENGL_TO_WGPU_MATRIX * proj * view;
+    }
+}
+
+// The most important part of the code
 struct State {
-    surface: wgpu::Surface,
-    device: wgpu::Device,
-    queue: wgpu::Queue,
-    config: wgpu::SurfaceConfiguration,
-    size: winit::dpi::PhysicalSize<u32>,
-    render_pipeline: wgpu::RenderPipeline,
-    vertex_buffer: wgpu::Buffer,
-    index_buffer: wgpu::Buffer,
-    num_indices: u32,
-    diffuse_bind_group: wgpu::BindGroup,
-    diffuse_texture: texture::Texture,
+    surface: wgpu::Surface,                // Where to draw
+    device: wgpu::Device,                  // Information about the device and its GPU/CPU
+    queue: wgpu::Queue,                    // A sort of memory queue
+    config: wgpu::SurfaceConfiguration,    // The configuration of the surface
+    size: winit::dpi::PhysicalSize<u32>,   // Needed to draw in the good dimensions/resolutions
+    render_pipeline: wgpu::RenderPipeline, // Actions to perfrom when rendering
+    vertex_buffer: wgpu::Buffer,           // The vertices that we give to the shader
+    index_buffer: wgpu::Buffer,            // Needed to remove duplicated data
+    num_indices: u32,                      // Number of vertices to draw for our current shape
+    diffuse_bind_group: wgpu::BindGroup, // The bind group passed to the render pipeline and the shader
+    diffuse_texture: texture::Texture,   // Needed in the future
+    camera: Camera,                      // The camera needed to control the view point
 
     // This parts should be removed when we start creating the API
+    // Not going to comment this
     background_color: wgpu::Color,
     perlin: Perlin,
     color_gaps: [f64; 3],
@@ -117,6 +159,7 @@ struct State {
     cat_diffuse_texture: texture::Texture,
 }
 
+// Needed to store the pressed keys
 struct KeyState {
     space: bool,
     enter: bool,
@@ -379,6 +422,20 @@ impl State {
             a: false,
         };
 
+        let camera = Camera {
+            // position the camera one unit up and 2 units back
+            // +z is out of the screen
+            eye: (0.0, 1.0, 2.0).into(),
+            // have it look at the origin
+            target: (0.0, 0.0, 0.0).into(),
+            // which way is "up"
+            up: cgmath::Vector3::unit_y(),
+            aspect: config.width as f32 / config.height as f32,
+            fovy: 45.0,
+            znear: 0.1,
+            zfar: 100.0,
+        };
+
         Self {
             surface,
             device,
@@ -391,6 +448,7 @@ impl State {
             num_indices,
             diffuse_bind_group,
             diffuse_texture,
+            camera,
 
             background_color,
             perlin,
