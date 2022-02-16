@@ -1,108 +1,62 @@
+use noise::{NoiseFn, Perlin};
 use wgpu::util::DeviceExt;
+use winit::window::Window;
 use winit::{
     event::*,
     event_loop::{ControlFlow, EventLoop},
     window::WindowBuilder,
 };
 
-use winit::window::Window;
+mod texture;
 
-use noise::{NoiseFn, Perlin};
+macro_rules! vertex {
+    ( $x:expr, $y:expr, $tex_x:expr, $tex_y:expr ) => {
+        Vertex {
+            position: [$x, $y, 0.0],
+            tex_coords: [$tex_x, 1.0 - $tex_y],
+        }
+    };
+    ( $x:expr, $y:expr, $off_x:expr, $off_y:expr, $scale: expr ) => {
+        vertex!(
+            $x,
+            $y,
+            ($x + 0.5 * $scale + $off_x) / $scale,
+            ($y + 0.5 * $scale + $off_y) / $scale
+        )
+    };
+}
 
 const VERTICES: &[Vertex] = &[
-    Vertex {
-        position: [-0.0868241, 0.49240386, 0.0],
-        color: [0.5, 0.0, 0.5],
-    }, // A
-    Vertex {
-        position: [-0.49513406, 0.06958647, 0.0],
-        color: [0.5, 0.0, 0.5],
-    }, // B
-    Vertex {
-        position: [-0.21918549, -0.44939706, 0.0],
-        color: [0.5, 0.0, 0.5],
-    }, // C
-    Vertex {
-        position: [0.35966998, -0.3473291, 0.0],
-        color: [0.5, 0.0, 0.5],
-    }, // D
-    Vertex {
-        position: [0.44147372, 0.2347359, 0.0],
-        color: [0.5, 0.0, 0.5],
-    }, // E
+    vertex!(-0.0868241, 0.49240386, 0.4131759, 0.99240386),
+    vertex!(-0.49513406, 0.06958647, 0.0048659444, 0.56958647),
+    vertex!(-0.21918549, -0.44939706, 0.28081453, 0.05060294),
+    vertex!(0.35966998, -0.3473291, 0.85967, 0.1526709),
+    vertex!(0.44147372, 0.2347359, 0.9414737, 0.7347359),
 ];
 
 const INDICES: &[u16] = &[0, 1, 4, 1, 2, 4, 2, 3, 4];
 
+const OFFSET_X: f32 = 0.0;
+const OFFSET_Y: f32 = -0.4;
+const SCALE: f32 = 1.2;
 const CAT_VERTICES: &[Vertex] = &[
-    Vertex {
-        position: [-0.4, 0.8, 0.0],
-        color: [0.0, 0.1, 0.3],
-    },
-    Vertex {
-        position: [-0.4, 0.6, 0.0],
-        color: [0.0, 0.1, 0.3],
-    },
-    Vertex {
-        position: [-0.2, 0.6, 0.0],
-        color: [0.0, 0.1, 0.3],
-    },
-    Vertex {
-        position: [0.4, 0.8, 0.0],
-        color: [0.0, 0.1, 0.3],
-    },
-    Vertex {
-        position: [0.4, 0.6, 0.0],
-        color: [0.0, 0.1, 0.3],
-    },
-    Vertex {
-        position: [0.2, 0.6, 0.0],
-        color: [0.0, 0.1, 0.3],
-    },
-    Vertex {
-        position: [-0.4, 0.1, 0.0],
-        color: [0.9, 0.7, 0.0],
-    },
-    Vertex {
-        position: [0.4, 0.1, 0.0],
-        color: [0.9, 0.7, 0.0],
-    },
-    Vertex {
-        position: [-0.3, 0.1, 0.0],
-        color: [0.9, 0.7, 0.0],
-    },
-    Vertex {
-        position: [-0.5, -0.6, 0.0],
-        color: [0.9, 0.7, 0.0],
-    },
-    Vertex {
-        position: [0.0, -0.8, 0.0],
-        color: [0.9, 0.7, 0.0],
-    },
-    Vertex {
-        position: [0.3, 0.1, 0.0],
-        color: [0.9, 0.7, 0.0],
-    },
-    Vertex {
-        position: [0.5, -0.6, 0.0],
-        color: [0.9, 0.7, 0.0],
-    },
-    Vertex {
-        position: [0.4, -0.4, 0.0],
-        color: [0.9, 0.7, 0.0],
-    },
-    Vertex {
-        position: [0.8, -0.3, 0.0],
-        color: [0.0, 0.1, 0.3],
-    },
-    Vertex {
-        position: [0.7, -0.35, 0.0],
-        color: [0.0, 0.1, 0.3],
-    },
-    Vertex {
-        position: [0.65, -0.2, 0.0],
-        color: [0.0, 0.1, 0.3],
-    },
+    vertex!(-0.4, 0.8, OFFSET_X, OFFSET_Y, SCALE),
+    vertex!(-0.4, 0.6, OFFSET_X, OFFSET_Y, SCALE),
+    vertex!(-0.2, 0.6, OFFSET_X, OFFSET_Y, SCALE),
+    vertex!(0.4, 0.8, OFFSET_X, OFFSET_Y, SCALE),
+    vertex!(0.4, 0.6, OFFSET_X, OFFSET_Y, SCALE),
+    vertex!(0.2, 0.6, OFFSET_X, OFFSET_Y, SCALE),
+    vertex!(-0.4, 0.1, OFFSET_X, OFFSET_Y, SCALE),
+    vertex!(0.4, 0.1, OFFSET_X, OFFSET_Y, SCALE),
+    vertex!(-0.3, 0.1, OFFSET_X, OFFSET_Y, SCALE),
+    vertex!(-0.5, -0.6, OFFSET_X, OFFSET_Y, SCALE),
+    vertex!(0.0, -0.8, OFFSET_X, OFFSET_Y, SCALE),
+    vertex!(0.3, 0.1, OFFSET_X, OFFSET_Y, SCALE),
+    vertex!(0.5, -0.6, OFFSET_X, OFFSET_Y, SCALE),
+    vertex!(0.4, -0.4, OFFSET_X, OFFSET_Y, SCALE),
+    vertex!(0.8, -0.3, OFFSET_X, OFFSET_Y, SCALE),
+    vertex!(0.7, -0.35, OFFSET_X, OFFSET_Y, SCALE),
+    vertex!(0.65, -0.2, OFFSET_X, OFFSET_Y, SCALE),
 ];
 
 const CAT_INDICES: &[u16] = &[
@@ -113,7 +67,7 @@ const CAT_INDICES: &[u16] = &[
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 struct Vertex {
     position: [f32; 3],
-    color: [f32; 3],
+    tex_coords: [f32; 2],
 }
 
 impl Vertex {
@@ -130,7 +84,7 @@ impl Vertex {
                 wgpu::VertexAttribute {
                     offset: std::mem::size_of::<[f32; 3]>() as wgpu::BufferAddress,
                     shader_location: 1,
-                    format: wgpu::VertexFormat::Float32x3,
+                    format: wgpu::VertexFormat::Float32x2,
                 },
             ],
         }
@@ -147,6 +101,8 @@ struct State {
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     num_indices: u32,
+    diffuse_bind_group: wgpu::BindGroup,
+    diffuse_texture: texture::Texture,
 
     // This parts should be removed when we start creating the API
     background_color: wgpu::Color,
@@ -157,11 +113,14 @@ struct State {
     cat_vertex_buffer: wgpu::Buffer,
     cat_index_buffer: wgpu::Buffer,
     cat_num_indices: u32,
+    cat_diffuse_bind_group: wgpu::BindGroup,
+    cat_diffuse_texture: texture::Texture,
 }
 
 struct KeyState {
     space: bool,
     enter: bool,
+    a: bool,
 }
 
 impl State {
@@ -203,6 +162,73 @@ impl State {
         };
         surface.configure(&device, &config);
 
+        let diffuse_bytes = include_bytes!("logo.png");
+        let diffuse_texture =
+            texture::Texture::from_bytes(&device, &queue, diffuse_bytes, "logo.png").unwrap();
+
+        let texture_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(
+                            // SamplerBindingType::Comparison is only for TextureSampleType::Depth
+                            // SamplerBindingType::Filtering if the sample_type of the texture is:
+                            //     TextureSampleType::Float { filterable: true }
+                            // Otherwise you'll get an error.
+                            wgpu::SamplerBindingType::Filtering,
+                        ),
+                        count: None,
+                    },
+                ],
+                label: Some("texture_bind_group_layout"),
+            });
+
+        let diffuse_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &texture_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&diffuse_texture.view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&diffuse_texture.sampler),
+                },
+            ],
+            label: Some("diffuse_bind_group"),
+        });
+
+        let cat_diffuse_bytes = include_bytes!("cat.png");
+        let cat_diffuse_texture =
+            texture::Texture::from_bytes(&device, &queue, cat_diffuse_bytes, "cat.png").unwrap();
+
+        let cat_diffuse_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &texture_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&cat_diffuse_texture.view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&cat_diffuse_texture.sampler),
+                },
+            ],
+            label: Some("cat_diffuse_bind_group"),
+        });
+
         let shader = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
             label: Some("Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
@@ -216,7 +242,7 @@ impl State {
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
-                bind_group_layouts: &[],
+                bind_group_layouts: &[&texture_bind_group_layout],
                 push_constant_ranges: &[],
             });
 
@@ -350,6 +376,7 @@ impl State {
         let key_state = KeyState {
             space: false,
             enter: false,
+            a: false,
         };
 
         Self {
@@ -362,6 +389,8 @@ impl State {
             vertex_buffer,
             index_buffer,
             num_indices,
+            diffuse_bind_group,
+            diffuse_texture,
 
             background_color,
             perlin,
@@ -371,6 +400,8 @@ impl State {
             cat_vertex_buffer,
             cat_index_buffer,
             cat_num_indices,
+            cat_diffuse_bind_group,
+            cat_diffuse_texture,
         }
     }
 
@@ -414,6 +445,10 @@ impl State {
                 }
                 Some(VirtualKeyCode::Return) => {
                     self.key_state.enter = state == &ElementState::Pressed;
+                    true
+                }
+                Some(VirtualKeyCode::A) => {
+                    self.key_state.a = state == &ElementState::Pressed;
                     true
                 }
                 _ => false,
@@ -468,7 +503,14 @@ impl State {
             )
         };
 
+        let diffuse_bind_group = if self.key_state.a {
+            &self.cat_diffuse_bind_group
+        } else {
+            &self.diffuse_bind_group
+        };
+
         render_pass.set_pipeline(render_pipeline);
+        render_pass.set_bind_group(0, diffuse_bind_group, &[]);
         render_pass.set_vertex_buffer(0, vertex_slice);
         render_pass.set_index_buffer(index_slice, wgpu::IndexFormat::Uint16);
         render_pass.draw_indexed(0..num_indices, 0, 0..1);
