@@ -83,9 +83,7 @@ struct State {
     config: wgpu::SurfaceConfiguration,    // The configuration of the surface
     size: winit::dpi::PhysicalSize<u32>,   // Needed to draw in the good dimensions/resolutions
     render_pipeline: wgpu::RenderPipeline, // Actions to perfrom when rendering
-    diffuse_bind_group: wgpu::BindGroup, // The bind group passed to the render pipeline and the shader
-    _diffuse_texture: texture::Texture,  // Needed in the future
-    camera: Camera,                      // The camera needed to control the view point
+    camera: Camera,                        // The camera needed to control the view point
     camera_uniform: CameraUniform,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
@@ -297,10 +295,6 @@ impl State {
         };
         surface.configure(&device, &config);
 
-        let diffuse_bytes = include_bytes!("logo.png");
-        let diffuse_texture =
-            texture::Texture::from_bytes(&device, &queue, diffuse_bytes, "logo.png").unwrap();
-
         let texture_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 entries: &[
@@ -329,21 +323,6 @@ impl State {
                 ],
                 label: Some("texture_bind_group_layout"),
             });
-
-        let diffuse_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &texture_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&diffuse_texture.view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&diffuse_texture.sampler),
-                },
-            ],
-            label: Some("diffuse_bind_group"),
-        });
 
         let depth_texture =
             texture::Texture::create_depth_texture(&device, &config, "depth_texture");
@@ -497,8 +476,6 @@ impl State {
             config,
             size,
             render_pipeline,
-            diffuse_bind_group,
-            _diffuse_texture: diffuse_texture,
             camera,
             camera_uniform,
             camera_buffer,
@@ -633,11 +610,13 @@ impl State {
         });
 
         render_pass.set_pipeline(&self.render_pipeline);
-        render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
-        render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
-
         render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-        render_pass.draw_mesh_instanced(&self.obj_model.meshes[0], 0..self.instances.len() as u32);
+
+        render_pass.draw_model_instanced(
+            &self.obj_model,
+            0..self.instances.len() as u32,
+            &self.camera_bind_group,
+        );
 
         drop(render_pass);
 
