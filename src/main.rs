@@ -120,13 +120,19 @@ struct Camera {
 }
 
 impl Camera {
-    fn build_view_projection_matrix(&self) -> cgmath::Matrix4<f32> {
+    fn build_view_projection_matrix(&self, transform: &Transform) -> cgmath::Matrix4<f32> {
         // Camera Position & Rotation
         let view = cgmath::Matrix4::look_at_rh(self.eye, self.target, self.up);
         // Perspective
         let proj = cgmath::perspective(cgmath::Deg(self.fovy), self.aspect, self.znear, self.zfar);
+
+        // Rotation Transform
+        let rotation = cgmath::Matrix4::from_angle_x(transform.rotation[Axis::X as usize])
+            * cgmath::Matrix4::from_angle_y(transform.rotation[Axis::Y as usize])
+            * cgmath::Matrix4::from_angle_z(transform.rotation[Axis::Z as usize]);
+
         // Wgpu coordinate system
-        OPENGL_TO_WGPU_MATRIX * proj * view
+        OPENGL_TO_WGPU_MATRIX * proj * view * rotation
     }
 }
 
@@ -149,8 +155,8 @@ impl CameraUniform {
         }
     }
 
-    fn update_view_proj(&mut self, camera: &Camera) {
-        self.view_proj = camera.build_view_projection_matrix().into();
+    fn update_view_proj(&mut self, camera: &Camera, transform: &Transform) {
+        self.view_proj = camera.build_view_projection_matrix(transform).into();
     }
 }
 
@@ -242,6 +248,24 @@ impl CameraController {
     }
 }
 
+#[allow(dead_code)]
+enum Axis {
+    X = 0,
+    Y = 1,
+    Z = 2,
+}
+
+#[derive(Debug)]
+struct Transform {
+    rotation: [cgmath::Deg<f32>; 3],
+}
+
+impl Transform {
+    fn rotate(&mut self, angle: cgmath::Deg<f32>, axis: Axis) {
+        self.rotation[axis as usize] += angle;
+    }
+}
+
 // Needed to store the pressed keys
 struct KeyState {
     space: bool,
@@ -280,6 +304,7 @@ struct State {
     cat_num_indices: u32,
     cat_diffuse_bind_group: wgpu::BindGroup,
     _cat_diffuse_texture: texture::Texture,
+    transform: Transform,
 }
 
 impl State {
@@ -413,7 +438,6 @@ impl State {
         };
 
         let mut camera_uniform = CameraUniform::new();
-        camera_uniform.update_view_proj(&camera);
 
         let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Camera Buffer"),
@@ -447,6 +471,12 @@ impl State {
 
         let camera_controller = CameraController::new(0.2);
 
+        let transform = Transform {
+            rotation: [cgmath::Deg(0.0); 3],
+        };
+
+        camera_uniform.update_view_proj(&camera, &transform);
+
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
@@ -463,11 +493,9 @@ impl State {
                 buffers: &[Vertex::desc()],
             },
             fragment: Some(wgpu::FragmentState {
-                // 3.
                 module: &shader,
                 entry_point: "fs_main",
                 targets: &[wgpu::ColorTargetState {
-                    // 4.
                     format: config.format,
                     blend: Some(wgpu::BlendState::REPLACE),
                     write_mask: wgpu::ColorWrites::ALL,
@@ -615,6 +643,7 @@ impl State {
             cat_num_indices,
             cat_diffuse_bind_group,
             _cat_diffuse_texture: cat_diffuse_texture,
+            transform,
         }
     }
 
@@ -676,12 +705,15 @@ impl State {
 
     fn update(&mut self) {
         self.camera_controller.update_camera(&mut self.camera);
-        self.camera_uniform.update_view_proj(&self.camera);
+        self.camera_uniform
+            .update_view_proj(&self.camera, &self.transform);
         self.queue.write_buffer(
             &self.camera_buffer,
             0,
             bytemuck::cast_slice(&[self.camera_uniform]),
         );
+
+        self.transform.rotate(cgmath::Deg(1.0), Axis::Y);
     }
 
     fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
