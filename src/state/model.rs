@@ -1,11 +1,10 @@
 // IMPORTS
 
+use super::texture;
 use anyhow::*;
 use std::{ops::Range, path::Path};
 use tobj::LoadOptions;
 use wgpu::util::DeviceExt;
-
-use crate::texture;
 
 // STRUCTURES
 
