@@ -28,10 +28,6 @@ pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::new(
     0.0, 0.0, 0.5, 1.0,
 );
 
-const NUM_INSTANCES_PER_ROW: u32 = 20;
-const SPACE_BETWEEN: f32 = 3.0;
-const WAVE_AMPLITUIDE: f32 = 4.0;
-
 // STRUCTURES
 
 pub struct State {
@@ -203,9 +199,9 @@ impl State {
         )
         .expect(&("Could not load `".to_owned() + model_name + "` model"));
 
-        let instances = (0..NUM_INSTANCES_PER_ROW)
+        let instances = (0..crate::NUM_INSTANCES_PER_ROW)
             .flat_map(|_| {
-                (0..NUM_INSTANCES_PER_ROW).map(move |_| instance::Instance {
+                (0..crate::NUM_INSTANCES_PER_ROW).map(move |_| instance::Instance {
                     position: cgmath::Vector3::zero(),
                     rotation: cgmath::Quaternion::zero(),
                 })
@@ -247,9 +243,9 @@ impl State {
                 }],
             }),
             primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList, // 1.
+                topology: wgpu::PrimitiveTopology::TriangleList,
                 strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw, // 2.
+                front_face: wgpu::FrontFace::Ccw,
                 cull_mode: Some(wgpu::Face::Back),
                 // Setting this to anything other than Fill requires Features::NON_FILL_POLYGON_MODE
                 polygon_mode: wgpu::PolygonMode::Fill,
@@ -354,15 +350,17 @@ impl State {
 
         let perlin = self.perlin;
         let elapsed = self.start.elapsed().as_millis() as f64;
-        self.instances = (0..NUM_INSTANCES_PER_ROW)
+        self.instances = (0..crate::NUM_INSTANCES_PER_ROW)
             .flat_map(|z| {
-                (0..NUM_INSTANCES_PER_ROW).map(move |x| {
+                (0..crate::NUM_INSTANCES_PER_ROW).map(move |x| {
                     let position = cgmath::Vector3 {
-                        x: SPACE_BETWEEN * (x as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0),
+                        x: crate::SPACE_BETWEEN
+                            * (x as f32 - crate::NUM_INSTANCES_PER_ROW as f32 / 2.0),
                         y: perlin.get([x as f64 / 10.0, z as f64 / 10.0, elapsed / 1000.0]) as f32
-                            * SPACE_BETWEEN
-                            * WAVE_AMPLITUIDE,
-                        z: SPACE_BETWEEN * (z as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0),
+                            * crate::SPACE_BETWEEN
+                            * crate::WAVE_AMPLITUIDE,
+                        z: crate::SPACE_BETWEEN
+                            * (z as f32 - crate::NUM_INSTANCES_PER_ROW as f32 / 2.0),
                     };
 
                     let rotation = if position.is_zero() {

@@ -10,6 +10,12 @@ use winit::{
     window::WindowBuilder,
 };
 
+// CONSTANTS
+
+pub const NUM_INSTANCES_PER_ROW: u32 = 20;
+pub const SPACE_BETWEEN: f32 = 3.0;
+pub const WAVE_AMPLITUIDE: f32 = 4.0;
+
 // MAIN FUNCTION
 
 fn main() {
