@@ -1,4 +1,6 @@
 #!/bin/sh
 . "$(dirname "$0")/_/husky.sh"
 
-cargo clippy
+cargo fmt -- --check
+cargo clippy --workspace -- -D warnings
+cargo test --workspace
