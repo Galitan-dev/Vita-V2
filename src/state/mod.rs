@@ -189,7 +189,7 @@ impl State {
 
         let camera_controller = camera::CameraController::new(0.2);
 
-        camera_uniform.update_view_proj(&camera);
+        camera_uniform.update_view_proj(&camera, size);
 
         let obj_model = model::Model::load(
             &device,
@@ -341,7 +341,8 @@ impl State {
 
     pub fn update(&mut self) {
         self.camera_controller.update_camera(&mut self.camera);
-        self.camera_uniform.update_view_proj(&self.camera);
+        self.camera_uniform
+            .update_view_proj(&self.camera, self.size);
         self.queue.write_buffer(
             &self.camera_buffer,
             0,

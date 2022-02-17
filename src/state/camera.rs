@@ -2,7 +2,10 @@
 
 use super::OPENGL_TO_WGPU_MATRIX;
 use cgmath::{InnerSpace, SquareMatrix};
-use winit::event::{ElementState, KeyboardInput, VirtualKeyCode, WindowEvent};
+use winit::{
+    dpi::PhysicalSize,
+    event::{ElementState, KeyboardInput, VirtualKeyCode, WindowEvent},
+};
 
 // STRUCTURES
 
@@ -22,9 +25,8 @@ pub struct Camera {
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 // The informations about the camera that will be passed to the shader
 pub struct CameraUniform {
-    // We can't use cgmath with bytemuck directly so we'll have
-    // to convert the Matrix4 into a 4x4 f32 array
-    view_proj: [[f32; 4]; 4],
+    pers_view_proj: [[f32; 4]; 4],
+    ortho_view_proj: [[f32; 4]; 4],
 }
 
 pub struct CameraController {
@@ -38,26 +40,48 @@ pub struct CameraController {
 // IMPLEMENTATIONS
 
 impl Camera {
-    pub fn build_view_projection_matrix(&self) -> cgmath::Matrix4<f32> {
+    pub fn build_view_projection_matrix(
+        &self,
+        size: PhysicalSize<u32>,
+    ) -> [cgmath::Matrix4<f32>; 2] {
         // Camera Position & Rotation
         let view = cgmath::Matrix4::look_at_rh(self.eye, self.target, self.up);
         // Perspective
-        let proj = cgmath::perspective(cgmath::Deg(self.fovy), self.aspect, self.znear, self.zfar);
+        let pers_proj =
+            cgmath::perspective(cgmath::Deg(self.fovy), self.aspect, self.znear, self.zfar);
+        // Orthographic
+        let dist = self.eye - self.target;
+        let scale = (dist.x.powi(2) + dist.y.powi(2) + dist.z.powi(2)).sqrt();
+        let ortho_proj = cgmath::ortho(
+            size.width as f32 * -scale / 100.0,
+            size.width as f32 * scale / 100.0,
+            size.height as f32 * -scale / 100.0,
+            size.height as f32 * scale / 100.0,
+            self.znear,
+            self.zfar,
+        );
 
         // Wgpu coordinate system
-        OPENGL_TO_WGPU_MATRIX * proj * view
+        [
+            OPENGL_TO_WGPU_MATRIX * pers_proj * view,
+            OPENGL_TO_WGPU_MATRIX * ortho_proj * view,
+        ]
     }
 }
 
 impl CameraUniform {
     pub fn new() -> Self {
         Self {
-            view_proj: cgmath::Matrix4::identity().into(),
+            pers_view_proj: cgmath::Matrix4::identity().into(),
+            ortho_view_proj: cgmath::Matrix4::identity().into(),
         }
     }
 
-    pub fn update_view_proj(&mut self, camera: &Camera) {
-        self.view_proj = camera.build_view_projection_matrix().into();
+    pub fn update_view_proj(&mut self, camera: &Camera, size: PhysicalSize<u32>) {
+        let view_proj = camera.build_view_projection_matrix(size);
+
+        self.pers_view_proj = view_proj[0].into();
+        self.ortho_view_proj = view_proj[1].into();
     }
 }
 
