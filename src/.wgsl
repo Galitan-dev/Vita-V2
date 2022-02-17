@@ -1,5 +1,15 @@
 // Vertex shader
 
+struct Camera {
+    view_proj: mat4x4<f32>;
+};
+[[group(1), binding(0)]]
+var<uniform> camera: Camera;
+
+struct VertexInput {
+    [[location(0)]] position: vec3<f32>;
+    [[location(1)]] tex_coords: vec2<f32>;
+};
 struct InstanceInput {
     [[location(5)]] model_matrix_0: vec4<f32>;
     [[location(6)]] model_matrix_1: vec4<f32>;
@@ -7,39 +17,27 @@ struct InstanceInput {
     [[location(8)]] model_matrix_3: vec4<f32>;
 };
 
-struct CameraUniform {
-    view_proj: mat4x4<f32>;
-};
-[[group(1), binding(0)]]
-var<uniform> camera: CameraUniform;
-
-struct VertexInput {
-    [[location(0)]] position: vec3<f32>;
-    [[location(1)]] tex_coords: vec2<f32>;
-};
-
 struct VertexOutput {
     [[builtin(position)]] clip_position: vec4<f32>;
     [[location(0)]] tex_coords: vec2<f32>;
-    [[location(1)]] position: vec2<f32>;
 };
 
 [[stage(vertex)]]
-fn vs_main(model: VertexInput, instance: InstanceInput) -> VertexOutput {
+fn vs_main(
+    model: VertexInput,
+    instance: InstanceInput,
+) -> VertexOutput {
     let model_matrix = mat4x4<f32>(
         instance.model_matrix_0,
         instance.model_matrix_1,
         instance.model_matrix_2,
         instance.model_matrix_3,
     );
-
     var out: VertexOutput;
-    out.clip_position = camera.view_proj * model_matrix * vec4<f32>(model.position, 1.0);
-    out.position = vec2<f32>(model.position[0], model.position[1]);
     out.tex_coords = model.tex_coords;
+    out.clip_position = camera.view_proj * model_matrix * vec4<f32>(model.position, 1.0);
     return out;
 }
-
 
 // Fragment shader
 
@@ -50,10 +48,5 @@ var s_diffuse: sampler;
 
 [[stage(fragment)]]
 fn fs_main(in: VertexOutput) -> [[location(0)]] vec4<f32> {
-    let from_tex = textureSample(t_diffuse, s_diffuse, in.tex_coords);
-    let from_pos = vec4<f32>(0.5, in.position, 0.0);
-    if (from_tex[3] == 0.0) {
-        return from_pos;
-    }
-    return from_tex;
+    return textureSample(t_diffuse, s_diffuse, in.tex_coords);
 }

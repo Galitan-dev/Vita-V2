@@ -1,8 +1,14 @@
+// MODULES
+
+mod model;
+mod texture;
+
 // IMPORTS
 
 use std::time::Instant;
 
 use cgmath::prelude::*;
+use model::{DrawModel, Vertex};
 use noise::{NoiseFn, Perlin};
 use wgpu::util::DeviceExt;
 use winit::window::Window;
@@ -12,78 +18,8 @@ use winit::{
     window::WindowBuilder,
 };
 
-// MODULES
-
-mod texture;
-
-// MACROS
-
-// Repetive parts are simplified with this macro
-macro_rules! vertex {
-    // Manually set texture coordinates
-    ( $x:expr, $y:expr, $tex_x:expr, $tex_y:expr ) => {
-        Vertex {
-            position: [$x, $y, 0.0],
-            tex_coords: [$tex_x, 1.0 - $tex_y],
-        }
-    };
-    // Automatically calculate the texture coordinates from scale and position
-    ( $x:expr, $y:expr, $off_x:expr, $off_y:expr, $scale: expr ) => {
-        vertex!(
-            $x,
-            $y,
-            ($x + 0.5 * $scale + $off_x) / $scale,
-            ($y + 0.5 * $scale + $off_y) / $scale
-        )
-    };
-}
-
 // CONSTANTS
 
-// A simple shape of three triangles
-const VERTICES: &[Vertex] = &[
-    vertex!(-0.0868241, 0.49240386, 0.4131759, 0.99240386),
-    vertex!(-0.49513406, 0.06958647, 0.0048659444, 0.56958647),
-    vertex!(-0.21918549, -0.44939706, 0.28081453, 0.05060294),
-    vertex!(0.35966998, -0.3473291, 0.85967, 0.1526709),
-    vertex!(0.44147372, 0.2347359, 0.9414737, 0.7347359),
-];
-// Save duplicated data
-const INDICES: &[u16] = &[0, 1, 4, 1, 2, 4, 2, 3, 4, 0, 4, 1, 1, 4, 2, 2, 4, 3];
-
-// Texture configuration
-const OFFSET_X: f32 = 0.0;
-const OFFSET_Y: f32 = -0.4;
-const SCALE: f32 = 1.2;
-// A complicated shape of about ten triangles
-const CAT_VERTICES: &[Vertex] = &[
-    vertex!(-0.4, 0.8, OFFSET_X, OFFSET_Y, SCALE),
-    vertex!(-0.4, 0.6, OFFSET_X, OFFSET_Y, SCALE),
-    vertex!(-0.2, 0.6, OFFSET_X, OFFSET_Y, SCALE),
-    vertex!(0.4, 0.8, OFFSET_X, OFFSET_Y, SCALE),
-    vertex!(0.4, 0.6, OFFSET_X, OFFSET_Y, SCALE),
-    vertex!(0.2, 0.6, OFFSET_X, OFFSET_Y, SCALE),
-    vertex!(-0.4, 0.1, OFFSET_X, OFFSET_Y, SCALE),
-    vertex!(0.4, 0.1, OFFSET_X, OFFSET_Y, SCALE),
-    vertex!(-0.3, 0.1, OFFSET_X, OFFSET_Y, SCALE),
-    vertex!(-0.5, -0.6, OFFSET_X, OFFSET_Y, SCALE),
-    vertex!(0.0, -0.8, OFFSET_X, OFFSET_Y, SCALE),
-    vertex!(0.3, 0.1, OFFSET_X, OFFSET_Y, SCALE),
-    vertex!(0.5, -0.6, OFFSET_X, OFFSET_Y, SCALE),
-    vertex!(0.4, -0.4, OFFSET_X, OFFSET_Y, SCALE),
-    vertex!(0.8, -0.3, OFFSET_X, OFFSET_Y, SCALE),
-    vertex!(0.7, -0.35, OFFSET_X, OFFSET_Y, SCALE),
-    vertex!(0.65, -0.2, OFFSET_X, OFFSET_Y, SCALE),
-];
-// Also save duplicated data
-const CAT_INDICES: &[u16] = &[
-    // Front face
-    0, 1, 2, 3, 5, 4, 1, 6, 4, 4, 6, 7, 8, 9, 10, 8, 10, 11, 11, 10, 12, 13, 12, 14, 16, 15, 14,
-    // Back face
-    0, 2, 1, 3, 4, 5, 1, 4, 6, 4, 7, 6, 8, 10, 9, 8, 11, 10, 11, 12, 10, 13, 14, 12, 16, 14, 15,
-];
-
-// Wgpu does not appear to be normal
 #[rustfmt::skip]
 pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::new(
     1.0, 0.0, 0.0, 0.0,
@@ -92,31 +28,11 @@ pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::new(
     0.0, 0.0, 0.5, 1.0,
 );
 
-const NUM_INSTANCES_PER_ROW: u32 = 10;
-const INSTANCE_DISPLACEMENT: cgmath::Vector3<f32> = cgmath::Vector3::new(
-    NUM_INSTANCES_PER_ROW as f32 * 0.5,
-    0.0,
-    NUM_INSTANCES_PER_ROW as f32 * 0.5,
-);
-
-// EUNUMERATIONS
-
-#[allow(dead_code)]
-enum Axis {
-    X = 0,
-    Y = 1,
-    Z = 2,
-}
+const NUM_INSTANCES_PER_ROW: u32 = 20;
+const SPACE_BETWEEN: f32 = 3.0;
+const WAVE_AMPLITUIDE: f32 = 4.0;
 
 // STRUCTURES
-
-// The object that is sent to the shader
-#[repr(C)]
-#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-struct Vertex {
-    position: [f32; 3],
-    tex_coords: [f32; 2],
-}
 
 struct Instance {
     position: cgmath::Vector3<f32>,
@@ -159,18 +75,6 @@ struct CameraController {
     is_right_pressed: bool,
 }
 
-#[derive(Debug)]
-struct Transform {
-    rotation: [cgmath::Deg<f32>; 3],
-}
-
-// Needed to store the pressed keys
-struct KeyState {
-    space: bool,
-    enter: bool,
-    a: bool,
-}
-
 // The most important part of the code
 struct State {
     surface: wgpu::Surface,                // Where to draw
@@ -179,9 +83,6 @@ struct State {
     config: wgpu::SurfaceConfiguration,    // The configuration of the surface
     size: winit::dpi::PhysicalSize<u32>,   // Needed to draw in the good dimensions/resolutions
     render_pipeline: wgpu::RenderPipeline, // Actions to perfrom when rendering
-    vertex_buffer: wgpu::Buffer,           // The vertices that we give to the shader
-    index_buffer: wgpu::Buffer,            // Needed to remove duplicated data
-    num_indices: u32,                      // Number of vertices to draw for our current shape
     diffuse_bind_group: wgpu::BindGroup, // The bind group passed to the render pipeline and the shader
     _diffuse_texture: texture::Texture,  // Needed in the future
     camera: Camera,                      // The camera needed to control the view point
@@ -192,46 +93,17 @@ struct State {
     instances: Vec<Instance>,
     instance_buffer: wgpu::Buffer,
     depth_texture: texture::Texture,
+    obj_model: model::Model,
 
     // This parts should be removed when we start creating the API
     // Not going to comment this
     background_color: wgpu::Color,
     perlin: Perlin,
     color_gaps: [f64; 3],
-    chroma_render_pipeline: wgpu::RenderPipeline,
-    key_state: KeyState,
-    cat_vertex_buffer: wgpu::Buffer,
-    cat_index_buffer: wgpu::Buffer,
-    cat_num_indices: u32,
-    cat_diffuse_bind_group: wgpu::BindGroup,
-    _cat_diffuse_texture: texture::Texture,
-    transform: Transform,
     start: Instant,
 }
 
 // IMPLEMENTATIONS
-
-// The vector layout for wgpu
-impl Vertex {
-    fn desc<'a>() -> wgpu::VertexBufferLayout<'a> {
-        wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &[
-                wgpu::VertexAttribute {
-                    offset: 0,
-                    shader_location: 0,
-                    format: wgpu::VertexFormat::Float32x3,
-                },
-                wgpu::VertexAttribute {
-                    offset: std::mem::size_of::<[f32; 3]>() as wgpu::BufferAddress,
-                    shader_location: 1,
-                    format: wgpu::VertexFormat::Float32x2,
-                },
-            ],
-        }
-    }
-}
 
 impl InstanceRaw {
     fn desc<'a>() -> wgpu::VertexBufferLayout<'a> {
@@ -284,19 +156,14 @@ impl Instance {
 }
 
 impl Camera {
-    fn build_view_projection_matrix(&self, transform: &Transform) -> cgmath::Matrix4<f32> {
+    fn build_view_projection_matrix(&self) -> cgmath::Matrix4<f32> {
         // Camera Position & Rotation
         let view = cgmath::Matrix4::look_at_rh(self.eye, self.target, self.up);
         // Perspective
         let proj = cgmath::perspective(cgmath::Deg(self.fovy), self.aspect, self.znear, self.zfar);
 
-        // Rotation Transform
-        let rotation = cgmath::Matrix4::from_angle_x(transform.rotation[Axis::X as usize])
-            * cgmath::Matrix4::from_angle_y(transform.rotation[Axis::Y as usize])
-            * cgmath::Matrix4::from_angle_z(transform.rotation[Axis::Z as usize]);
-
         // Wgpu coordinate system
-        OPENGL_TO_WGPU_MATRIX * proj * view * rotation
+        OPENGL_TO_WGPU_MATRIX * proj * view
     }
 }
 
@@ -307,8 +174,8 @@ impl CameraUniform {
         }
     }
 
-    fn update_view_proj(&mut self, camera: &Camera, transform: &Transform) {
-        self.view_proj = camera.build_view_projection_matrix(transform).into();
+    fn update_view_proj(&mut self, camera: &Camera) {
+        self.view_proj = camera.build_view_projection_matrix().into();
     }
 }
 
@@ -388,12 +255,6 @@ impl CameraController {
         if self.is_left_pressed {
             camera.eye = camera.target - (forward - right * self.speed).normalize() * forward_mag;
         }
-    }
-}
-
-impl Transform {
-    fn rotate(&mut self, angle: cgmath::Deg<f32>, axis: Axis) {
-        self.rotation[axis as usize] += angle;
     }
 }
 
@@ -484,36 +345,12 @@ impl State {
             label: Some("diffuse_bind_group"),
         });
 
-        let cat_diffuse_bytes = include_bytes!("cat.png");
-        let cat_diffuse_texture =
-            texture::Texture::from_bytes(&device, &queue, cat_diffuse_bytes, "cat.png").unwrap();
-
-        let cat_diffuse_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &texture_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&cat_diffuse_texture.view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&cat_diffuse_texture.sampler),
-                },
-            ],
-            label: Some("cat_diffuse_bind_group"),
-        });
-
         let depth_texture =
             texture::Texture::create_depth_texture(&device, &config, "depth_texture");
 
         let shader = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
             label: Some("Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
-        });
-
-        let chroma_shader = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
-            label: Some("Chroma Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("chroma_shader.wgsl").into()),
         });
 
         let camera = Camera {
@@ -564,33 +401,22 @@ impl State {
 
         let camera_controller = CameraController::new(0.2);
 
-        let transform = Transform {
-            rotation: [cgmath::Deg(0.0); 3],
-        };
+        camera_uniform.update_view_proj(&camera);
 
-        camera_uniform.update_view_proj(&camera, &transform);
+        let res_dir = std::path::Path::new(env!("OUT_DIR")).join("res");
+        let obj_model = model::Model::load(
+            &device,
+            &queue,
+            &texture_bind_group_layout,
+            res_dir.join("cube.obj"),
+        )
+        .unwrap();
 
         let instances = (0..NUM_INSTANCES_PER_ROW)
-            .flat_map(|z| {
-                (0..NUM_INSTANCES_PER_ROW).map(move |x| {
-                    let position = cgmath::Vector3 {
-                        x: x as f32,
-                        y: 0.0,
-                        z: z as f32,
-                    } - INSTANCE_DISPLACEMENT;
-
-                    let rotation = if position.is_zero() {
-                        // this is needed so an object at (0, 0, 0) won't get scaled to zero
-                        // as Quaternions can effect scale if they're not created correctly
-                        cgmath::Quaternion::from_axis_angle(
-                            cgmath::Vector3::unit_z(),
-                            cgmath::Deg(0.0),
-                        )
-                    } else {
-                        cgmath::Quaternion::from_axis_angle(position.normalize(), cgmath::Deg(45.0))
-                    };
-
-                    Instance { position, rotation }
+            .flat_map(|_| {
+                (0..NUM_INSTANCES_PER_ROW).map(move |_| Instance {
+                    position: cgmath::Vector3::zero(),
+                    rotation: cgmath::Quaternion::zero(),
                 })
             })
             .collect::<Vec<_>>();
@@ -615,7 +441,7 @@ impl State {
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: "vs_main",
-                buffers: &[Vertex::desc(), InstanceRaw::desc()],
+                buffers: &[model::ModelVertex::desc(), InstanceRaw::desc()],
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
@@ -653,83 +479,6 @@ impl State {
             multiview: None,
         });
 
-        let chroma_buffer_layout = wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &[wgpu::VertexAttribute {
-                offset: 0,
-                shader_location: 0,
-                format: wgpu::VertexFormat::Float32x3,
-            }],
-        };
-
-        let chroma_render_pipeline =
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("Chroma Render Pipeline"),
-                layout: Some(&render_pipeline_layout),
-                vertex: wgpu::VertexState {
-                    module: &chroma_shader,
-                    entry_point: "vs_main",
-                    buffers: &[chroma_buffer_layout],
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &chroma_shader,
-                    entry_point: "fs_main",
-                    targets: &[wgpu::ColorTargetState {
-                        format: config.format,
-                        blend: Some(wgpu::BlendState::REPLACE),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    }],
-                }),
-                primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::TriangleList,
-                    strip_index_format: None,
-                    front_face: wgpu::FrontFace::Ccw,
-                    cull_mode: Some(wgpu::Face::Back),
-                    // Setting this to anything other than Fill requires Features::NON_FILL_POLYGON_MODE
-                    polygon_mode: wgpu::PolygonMode::Fill,
-                    // Requires Features::DEPTH_CLIP_CONTROL
-                    unclipped_depth: false,
-                    // Requires Features::CONSERVATIVE_RASTERIZATION
-                    conservative: false,
-                },
-                depth_stencil: None,
-                multisample: wgpu::MultisampleState {
-                    count: 1,
-                    mask: !0,
-                    alpha_to_coverage_enabled: false,
-                },
-                multiview: None,
-            });
-
-        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Vertex Buffer"),
-            contents: bytemuck::cast_slice(VERTICES),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-
-        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Index Buffer"),
-            contents: bytemuck::cast_slice(INDICES),
-            usage: wgpu::BufferUsages::INDEX,
-        });
-
-        let num_indices = INDICES.len() as u32;
-
-        let cat_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Cat Vertex Buffer"),
-            contents: bytemuck::cast_slice(CAT_VERTICES),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-
-        let cat_index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Cat Index Buffer"),
-            contents: bytemuck::cast_slice(CAT_INDICES),
-            usage: wgpu::BufferUsages::INDEX,
-        });
-
-        let cat_num_indices = CAT_INDICES.len() as u32;
-
         let background_color = wgpu::Color {
             r: 0.1,
             g: 0.2,
@@ -739,13 +488,6 @@ impl State {
 
         let perlin = Perlin::new();
         let color_gaps = rand::random();
-
-        let key_state = KeyState {
-            space: false,
-            enter: false,
-            a: false,
-        };
-
         let start = Instant::now();
 
         Self {
@@ -755,9 +497,6 @@ impl State {
             config,
             size,
             render_pipeline,
-            vertex_buffer,
-            index_buffer,
-            num_indices,
             diffuse_bind_group,
             _diffuse_texture: diffuse_texture,
             camera,
@@ -768,18 +507,11 @@ impl State {
             instances,
             instance_buffer,
             depth_texture,
+            obj_model,
 
             background_color,
             perlin,
             color_gaps,
-            chroma_render_pipeline,
-            key_state,
-            cat_vertex_buffer,
-            cat_index_buffer,
-            cat_num_indices,
-            cat_diffuse_bind_group,
-            _cat_diffuse_texture: cat_diffuse_texture,
-            transform,
             start,
         }
     }
@@ -815,44 +547,18 @@ impl State {
 
                 true
             }
-            WindowEvent::KeyboardInput {
-                input:
-                    KeyboardInput {
-                        virtual_keycode,
-                        state,
-                        ..
-                    },
-                ..
-            } => match virtual_keycode {
-                Some(VirtualKeyCode::Space) => {
-                    self.key_state.space = state == &ElementState::Pressed;
-                    true
-                }
-                Some(VirtualKeyCode::Return) => {
-                    self.key_state.enter = state == &ElementState::Pressed;
-                    true
-                }
-                Some(VirtualKeyCode::A) => {
-                    self.key_state.a = state == &ElementState::Pressed;
-                    true
-                }
-                _ => false,
-            },
             _ => false,
         }
     }
 
     fn update(&mut self) {
         self.camera_controller.update_camera(&mut self.camera);
-        self.camera_uniform
-            .update_view_proj(&self.camera, &self.transform);
+        self.camera_uniform.update_view_proj(&self.camera);
         self.queue.write_buffer(
             &self.camera_buffer,
             0,
             bytemuck::cast_slice(&[self.camera_uniform]),
         );
-
-        self.transform.rotate(cgmath::Deg(1.0), Axis::Y);
 
         let perlin = self.perlin;
         let elapsed = self.start.elapsed().as_millis() as f64;
@@ -860,15 +566,14 @@ impl State {
             .flat_map(|z| {
                 (0..NUM_INSTANCES_PER_ROW).map(move |x| {
                     let position = cgmath::Vector3 {
-                        x: x as f32,
+                        x: SPACE_BETWEEN * (x as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0),
                         y: perlin.get([x as f64 / 10.0, z as f64 / 10.0, elapsed / 1000.0]) as f32
-                            * 3.0,
-                        z: z as f32,
-                    } - INSTANCE_DISPLACEMENT;
+                            * SPACE_BETWEEN
+                            * WAVE_AMPLITUIDE,
+                        z: SPACE_BETWEEN * (z as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0),
+                    };
 
                     let rotation = if position.is_zero() {
-                        // this is needed so an object at (0, 0, 0) won't get scaled to zero
-                        // as Quaternions can effect scale if they're not created correctly
                         cgmath::Quaternion::from_axis_angle(
                             cgmath::Vector3::unit_z(),
                             cgmath::Deg(0.0),
@@ -927,41 +632,12 @@ impl State {
             }),
         });
 
-        let render_pipeline = if self.key_state.space {
-            &self.chroma_render_pipeline
-        } else {
-            &self.render_pipeline
-        };
-
-        let (vertex_slice, index_slice, num_indices) = if self.key_state.enter {
-            (
-                self.cat_vertex_buffer.slice(..),
-                self.cat_index_buffer.slice(..),
-                self.cat_num_indices,
-            )
-        } else {
-            (
-                self.vertex_buffer.slice(..),
-                self.index_buffer.slice(..),
-                self.num_indices,
-            )
-        };
-
-        let diffuse_bind_group = if self.key_state.a {
-            &self.cat_diffuse_bind_group
-        } else {
-            &self.diffuse_bind_group
-        };
-
-        render_pass.set_pipeline(render_pipeline);
-        render_pass.set_bind_group(0, diffuse_bind_group, &[]);
+        render_pass.set_pipeline(&self.render_pipeline);
+        render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
         render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
 
-        render_pass.set_vertex_buffer(0, vertex_slice);
         render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-        render_pass.set_index_buffer(index_slice, wgpu::IndexFormat::Uint16);
-
-        render_pass.draw_indexed(0..num_indices, 0, 0..self.instances.len() as _);
+        render_pass.draw_mesh_instanced(&self.obj_model.meshes[0], 0..self.instances.len() as u32);
 
         drop(render_pass);
 
