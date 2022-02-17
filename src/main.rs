@@ -38,7 +38,7 @@ const VERTICES: &[Vertex] = &[
     vertex!(0.44147372, 0.2347359, 0.9414737, 0.7347359),
 ];
 // Save duplicated data
-const INDICES: &[u16] = &[0, 1, 4, 1, 2, 4, 2, 3, 4];
+const INDICES: &[u16] = &[0, 1, 4, 1, 2, 4, 2, 3, 4, 0, 4, 1, 1, 4, 2, 2, 4, 3];
 
 // Texture configuration
 const OFFSET_X: f32 = 0.0;
@@ -66,7 +66,10 @@ const CAT_VERTICES: &[Vertex] = &[
 ];
 // Also save duplicated data
 const CAT_INDICES: &[u16] = &[
+    // Front face
     0, 1, 2, 3, 5, 4, 1, 6, 4, 4, 6, 7, 8, 9, 10, 8, 10, 11, 11, 10, 12, 13, 12, 14, 16, 15, 14,
+    // Back face
+    0, 2, 1, 3, 4, 5, 1, 4, 6, 4, 7, 6, 8, 10, 9, 8, 11, 10, 11, 12, 10, 13, 14, 12, 16, 14, 15,
 ];
 
 // The object that is sent to the shader
