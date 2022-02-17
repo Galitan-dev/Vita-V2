@@ -1,3 +1,5 @@
+// IMPORTS
+
 use noise::{NoiseFn, Perlin};
 use wgpu::util::DeviceExt;
 use winit::window::Window;
@@ -7,7 +9,11 @@ use winit::{
     window::WindowBuilder,
 };
 
+// MODULES
+
 mod texture;
+
+// MACROS
 
 // Repetive parts are simplified with this macro
 macro_rules! vertex {
@@ -28,6 +34,8 @@ macro_rules! vertex {
         )
     };
 }
+
+// CONSTANTS
 
 // A simple shape of three triangles
 const VERTICES: &[Vertex] = &[
@@ -72,6 +80,26 @@ const CAT_INDICES: &[u16] = &[
     0, 2, 1, 3, 4, 5, 1, 4, 6, 4, 7, 6, 8, 10, 9, 8, 11, 10, 11, 12, 10, 13, 14, 12, 16, 14, 15,
 ];
 
+// Wgpu does not appear to be normal
+#[rustfmt::skip]
+pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::new(
+    1.0, 0.0, 0.0, 0.0,
+    0.0, 1.0, 0.0, 0.0,
+    0.0, 0.0, 0.5, 0.0,
+    0.0, 0.0, 0.5, 1.0,
+);
+
+// EUNUMERATIONS
+
+#[allow(dead_code)]
+enum Axis {
+    X = 0,
+    Y = 1,
+    Z = 2,
+}
+
+// STRUCTURES
+
 // The object that is sent to the shader
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -79,6 +107,84 @@ struct Vertex {
     position: [f32; 3],
     tex_coords: [f32; 2],
 }
+
+// To manipulate the viewpoint
+struct Camera {
+    eye: cgmath::Point3<f32>,
+    target: cgmath::Point3<f32>,
+    up: cgmath::Vector3<f32>,
+    aspect: f32,
+    fovy: f32,
+    znear: f32,
+    zfar: f32,
+}
+
+// We need this for Rust to store our data correctly for the shaders
+#[repr(C)]
+// This is so we can store this in a buffer
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+// The informations about the camera that will be passed to the shader
+struct CameraUniform {
+    // We can't use cgmath with bytemuck directly so we'll have
+    // to convert the Matrix4 into a 4x4 f32 array
+    view_proj: [[f32; 4]; 4],
+}
+
+struct CameraController {
+    speed: f32,
+    is_forward_pressed: bool,
+    is_backward_pressed: bool,
+    is_left_pressed: bool,
+    is_right_pressed: bool,
+}
+
+#[derive(Debug)]
+struct Transform {
+    rotation: [cgmath::Deg<f32>; 3],
+}
+
+// Needed to store the pressed keys
+struct KeyState {
+    space: bool,
+    enter: bool,
+    a: bool,
+}
+
+// The most important part of the code
+struct State {
+    surface: wgpu::Surface,                // Where to draw
+    device: wgpu::Device,                  // Information about the device and its GPU/CPU
+    queue: wgpu::Queue,                    // A sort of memory queue
+    config: wgpu::SurfaceConfiguration,    // The configuration of the surface
+    size: winit::dpi::PhysicalSize<u32>,   // Needed to draw in the good dimensions/resolutions
+    render_pipeline: wgpu::RenderPipeline, // Actions to perfrom when rendering
+    vertex_buffer: wgpu::Buffer,           // The vertices that we give to the shader
+    index_buffer: wgpu::Buffer,            // Needed to remove duplicated data
+    num_indices: u32,                      // Number of vertices to draw for our current shape
+    diffuse_bind_group: wgpu::BindGroup, // The bind group passed to the render pipeline and the shader
+    _diffuse_texture: texture::Texture,  // Needed in the future
+    camera: Camera,                      // The camera needed to control the view point
+    camera_uniform: CameraUniform,
+    camera_buffer: wgpu::Buffer,
+    camera_bind_group: wgpu::BindGroup,
+    camera_controller: CameraController,
+
+    // This parts should be removed when we start creating the API
+    // Not going to comment this
+    background_color: wgpu::Color,
+    perlin: Perlin,
+    color_gaps: [f64; 3],
+    chroma_render_pipeline: wgpu::RenderPipeline,
+    key_state: KeyState,
+    cat_vertex_buffer: wgpu::Buffer,
+    cat_index_buffer: wgpu::Buffer,
+    cat_num_indices: u32,
+    cat_diffuse_bind_group: wgpu::BindGroup,
+    _cat_diffuse_texture: texture::Texture,
+    transform: Transform,
+}
+
+// IMPLEMENTATIONS
 
 // The vector layout for wgpu
 impl Vertex {
@@ -102,26 +208,6 @@ impl Vertex {
     }
 }
 
-// Wgpu does not appear to be normal
-#[rustfmt::skip]
-pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::new(
-    1.0, 0.0, 0.0, 0.0,
-    0.0, 1.0, 0.0, 0.0,
-    0.0, 0.0, 0.5, 0.0,
-    0.0, 0.0, 0.5, 1.0,
-);
-
-// To manipulate the viewpoint
-struct Camera {
-    eye: cgmath::Point3<f32>,
-    target: cgmath::Point3<f32>,
-    up: cgmath::Vector3<f32>,
-    aspect: f32,
-    fovy: f32,
-    znear: f32,
-    zfar: f32,
-}
-
 impl Camera {
     fn build_view_projection_matrix(&self, transform: &Transform) -> cgmath::Matrix4<f32> {
         // Camera Position & Rotation
@@ -139,17 +225,6 @@ impl Camera {
     }
 }
 
-// We need this for Rust to store our data correctly for the shaders
-#[repr(C)]
-// This is so we can store this in a buffer
-#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-// The informations about the camera that will be passed to the shader
-struct CameraUniform {
-    // We can't use cgmath with bytemuck directly so we'll have
-    // to convert the Matrix4 into a 4x4 f32 array
-    view_proj: [[f32; 4]; 4],
-}
-
 impl CameraUniform {
     fn new() -> Self {
         use cgmath::SquareMatrix;
@@ -161,14 +236,6 @@ impl CameraUniform {
     fn update_view_proj(&mut self, camera: &Camera, transform: &Transform) {
         self.view_proj = camera.build_view_projection_matrix(transform).into();
     }
-}
-
-struct CameraController {
-    speed: f32,
-    is_forward_pressed: bool,
-    is_backward_pressed: bool,
-    is_left_pressed: bool,
-    is_right_pressed: bool,
 }
 
 impl CameraController {
@@ -251,63 +318,10 @@ impl CameraController {
     }
 }
 
-#[allow(dead_code)]
-enum Axis {
-    X = 0,
-    Y = 1,
-    Z = 2,
-}
-
-#[derive(Debug)]
-struct Transform {
-    rotation: [cgmath::Deg<f32>; 3],
-}
-
 impl Transform {
     fn rotate(&mut self, angle: cgmath::Deg<f32>, axis: Axis) {
         self.rotation[axis as usize] += angle;
     }
-}
-
-// Needed to store the pressed keys
-struct KeyState {
-    space: bool,
-    enter: bool,
-    a: bool,
-}
-
-// The most important part of the code
-struct State {
-    surface: wgpu::Surface,                // Where to draw
-    device: wgpu::Device,                  // Information about the device and its GPU/CPU
-    queue: wgpu::Queue,                    // A sort of memory queue
-    config: wgpu::SurfaceConfiguration,    // The configuration of the surface
-    size: winit::dpi::PhysicalSize<u32>,   // Needed to draw in the good dimensions/resolutions
-    render_pipeline: wgpu::RenderPipeline, // Actions to perfrom when rendering
-    vertex_buffer: wgpu::Buffer,           // The vertices that we give to the shader
-    index_buffer: wgpu::Buffer,            // Needed to remove duplicated data
-    num_indices: u32,                      // Number of vertices to draw for our current shape
-    diffuse_bind_group: wgpu::BindGroup, // The bind group passed to the render pipeline and the shader
-    _diffuse_texture: texture::Texture,  // Needed in the future
-    camera: Camera,                      // The camera needed to control the view point
-    camera_uniform: CameraUniform,
-    camera_buffer: wgpu::Buffer,
-    camera_bind_group: wgpu::BindGroup,
-    camera_controller: CameraController,
-
-    // This parts should be removed when we start creating the API
-    // Not going to comment this
-    background_color: wgpu::Color,
-    perlin: Perlin,
-    color_gaps: [f64; 3],
-    chroma_render_pipeline: wgpu::RenderPipeline,
-    key_state: KeyState,
-    cat_vertex_buffer: wgpu::Buffer,
-    cat_index_buffer: wgpu::Buffer,
-    cat_num_indices: u32,
-    cat_diffuse_bind_group: wgpu::BindGroup,
-    _cat_diffuse_texture: texture::Texture,
-    transform: Transform,
 }
 
 impl State {
@@ -784,6 +798,8 @@ impl State {
         Ok(())
     }
 }
+
+// MAIN
 
 fn main() {
     env_logger::init();
