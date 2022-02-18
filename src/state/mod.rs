@@ -303,7 +303,7 @@ impl State {
             });
 
             let shader_bytes = read_to_string(res_dir.join("shaders").join("light.wgsl"))
-                .expect(&("Could not read shader `Light Shader`"));
+                .expect("Could not read shader `Light Shader`");
 
             let shader = wgpu::ShaderModuleDescriptor {
                 label: Some("Light Shader"),
