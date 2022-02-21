@@ -25,6 +25,7 @@ pub struct Camera {
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 // The informations about the camera that will be passed to the shader
 pub struct CameraUniform {
+    view_position: [f32; 4],
     pers_view_proj: [[f32; 4]; 4],
     ortho_view_proj: [[f32; 4]; 4],
 }
@@ -72,6 +73,7 @@ impl Camera {
 impl CameraUniform {
     pub fn new() -> Self {
         Self {
+            view_position: [0.0; 4],
             pers_view_proj: cgmath::Matrix4::identity().into(),
             ortho_view_proj: cgmath::Matrix4::identity().into(),
         }
@@ -79,9 +81,10 @@ impl CameraUniform {
 
     pub fn update_view_proj(&mut self, camera: &Camera, size: PhysicalSize<u32>) {
         let view_proj = camera.build_view_projection_matrix(size);
-
         self.pers_view_proj = view_proj[0].into();
         self.ortho_view_proj = view_proj[1].into();
+
+        self.view_position = camera.eye.to_homogeneous().into();
     }
 }
 
