@@ -2,12 +2,14 @@
 
 mod camera;
 mod instance;
+mod light;
 mod model;
 mod texture;
 
 // IMPORTS
 
 use cgmath::prelude::*;
+use light::DrawLight;
 use model::{DrawModel, Vertex};
 use noise::{NoiseFn, Perlin};
 use std::fs::read_to_string;
@@ -17,8 +19,6 @@ use wgpu::util::DeviceExt;
 use winit::dpi::PhysicalSize;
 use winit::event::*;
 use winit::window::Window;
-
-use self::model::DrawLight;
 
 // CONSTANTS
 
@@ -31,17 +31,6 @@ pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::new(
 );
 
 // STRUCTURES
-
-#[repr(C)]
-#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-struct LightUniform {
-    position: [f32; 3],
-    // Due to uniforms requiring 16 byte (4 float) spacing, we need to use a padding field here
-    _padding: u32,
-    color: [f32; 3],
-    // Due to uniforms requiring 16 byte (4 float) spacing, we need to use a padding field here
-    _padding2: u32,
-}
 
 pub struct State {
     surface: wgpu::Surface,                // Where to draw
@@ -59,7 +48,7 @@ pub struct State {
     instance_buffer: wgpu::Buffer,
     depth_texture: texture::Texture,
     obj_model: model::Model,
-    light_uniform: LightUniform,
+    light_uniform: light::LightUniform,
     light_buffer: wgpu::Buffer,
     light_bind_group: wgpu::BindGroup,
     light_render_pipeline: wgpu::RenderPipeline,
@@ -224,7 +213,7 @@ impl State {
             usage: wgpu::BufferUsages::VERTEX,
         });
 
-        let light_uniform = LightUniform {
+        let light_uniform = light::LightUniform {
             position: [2.0, 2.0, 2.0],
             _padding: 0,
             color: [1.0, 1.0, 1.0],
