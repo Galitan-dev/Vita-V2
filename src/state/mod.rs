@@ -1,6 +1,7 @@
 // MODULES
 
 mod camera;
+mod helpers;
 mod instance;
 mod light;
 mod model;
@@ -19,6 +20,8 @@ use wgpu::util::DeviceExt;
 use winit::dpi::PhysicalSize;
 use winit::event::*;
 use winit::window::Window;
+
+use self::helpers::read_to_bytes;
 
 // CONSTANTS
 
@@ -58,13 +61,19 @@ pub struct State {
     perlin: Perlin,
     color_gaps: [f64; 3],
     start: Instant,
+    debug_material: Option<model::Material>,
 }
 
 // IMPLEMENTATIONS
 
 impl State {
     // Creating some of the wgpu types requires async code
-    pub async fn new(window: &Window, shader_name: &str, model_name: &str) -> Self {
+    pub async fn new(
+        window: &Window,
+        shader_name: &str,
+        model_name: &str,
+        debug_material_name: Option<&str>,
+    ) -> Self {
         let size = window.inner_size();
 
         // The instance is a handle to our GPU
@@ -126,6 +135,22 @@ impl State {
                         ),
                         count: None,
                     },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
                 ],
                 label: Some("texture_bind_group_layout"),
             });
@@ -183,7 +208,7 @@ impl State {
 
         let camera_controller = camera::CameraController::new(0.2);
 
-        camera_uniform.update_view_proj(&camera, size);
+        camera_uniform.update_view_proj(&camera);
 
         let obj_model = model::Model::load(
             &device,
@@ -320,6 +345,49 @@ impl State {
         let color_gaps = rand::random();
         let start = Instant::now();
 
+        let debug_material = debug_material_name.map(|material_name| {
+            let diffuse_bytes = read_to_bytes(
+                res_dir
+                    .join("materials")
+                    .join(material_name)
+                    .join("diffuse.png"),
+            )
+            .expect("Could not read debug material diffuse");
+
+            let normal_bytes = read_to_bytes(
+                res_dir
+                    .join("materials")
+                    .join(material_name)
+                    .join("normal.png"),
+            )
+            .expect("Could not read debug material normal");
+
+            let diffuse_texture = texture::Texture::from_bytes(
+                &device,
+                &queue,
+                &diffuse_bytes,
+                "Debug Material Diffuse",
+                false,
+            )
+            .unwrap();
+            let normal_texture = texture::Texture::from_bytes(
+                &device,
+                &queue,
+                &normal_bytes,
+                "Debug Material Normal",
+                true,
+            )
+            .unwrap();
+
+            model::Material::new(
+                &device,
+                "alt-material",
+                diffuse_texture,
+                normal_texture,
+                &texture_bind_group_layout,
+            )
+        });
+
         Self {
             surface,
             device,
@@ -345,6 +413,7 @@ impl State {
             perlin,
             color_gaps,
             start,
+            debug_material,
         }
     }
 
@@ -385,8 +454,7 @@ impl State {
 
     pub fn update(&mut self) {
         self.camera_controller.update_camera(&mut self.camera);
-        self.camera_uniform
-            .update_view_proj(&self.camera, self.size);
+        self.camera_uniform.update_view_proj(&self.camera);
         self.queue.write_buffer(
             &self.camera_buffer,
             0,
@@ -394,28 +462,25 @@ impl State {
         );
 
         let perlin = self.perlin;
-        let elapsed = self.start.elapsed().as_millis() as f64;
+        let elapsed = self.start.elapsed().as_millis() as f64 / 1000000.0;
         self.instances = (0..crate::NUM_INSTANCES_PER_ROW)
             .flat_map(|z| {
                 (0..crate::NUM_INSTANCES_PER_ROW).map(move |x| {
                     let position = cgmath::Vector3 {
                         x: crate::SPACE_BETWEEN
                             * (x as f32 - crate::NUM_INSTANCES_PER_ROW as f32 / 2.0),
-                        y: perlin.get([x as f64 / 10.0, z as f64 / 10.0, elapsed / 1000.0]) as f32
-                            * crate::SPACE_BETWEEN
-                            * crate::WAVE_AMPLITUIDE,
+                        y: (perlin.get([x as f64 / 10.0, z as f64 / 10.0, elapsed]) as f32
+                            * crate::WAVE_AMPLITUIDE)
+                            .round()
+                            * crate::SPACE_BETWEEN,
                         z: crate::SPACE_BETWEEN
                             * (z as f32 - crate::NUM_INSTANCES_PER_ROW as f32 / 2.0),
                     };
 
-                    let rotation = if position.is_zero() {
-                        cgmath::Quaternion::from_axis_angle(
-                            cgmath::Vector3::unit_z(),
-                            cgmath::Deg(0.0),
-                        )
-                    } else {
-                        cgmath::Quaternion::from_axis_angle(position.normalize(), cgmath::Deg(45.0))
-                    };
+                    let rotation = cgmath::Quaternion::from_axis_angle(
+                        cgmath::Vector3::unit_z(),
+                        cgmath::Deg(0.0),
+                    );
 
                     instance::Instance { position, rotation }
                 })
@@ -488,12 +553,22 @@ impl State {
         );
 
         render_pass.set_pipeline(&self.render_pipeline);
-        render_pass.draw_model_instanced(
-            &self.obj_model,
-            0..self.instances.len() as u32,
-            &self.camera_bind_group,
-            &self.light_bind_group,
-        );
+        if let Some(debug_material) = &self.debug_material {
+            render_pass.draw_model_instanced_with_material(
+                &self.obj_model,
+                debug_material,
+                0..self.instances.len() as u32,
+                &self.camera_bind_group,
+                &self.light_bind_group,
+            );
+        } else {
+            render_pass.draw_model_instanced(
+                &self.obj_model,
+                0..self.instances.len() as u32,
+                &self.camera_bind_group,
+                &self.light_bind_group,
+            );
+        }
 
         drop(render_pass);
 

@@ -12,8 +12,8 @@ use winit::{
 
 // CONSTANTS
 
-pub const NUM_INSTANCES_PER_ROW: u32 = 20;
-pub const SPACE_BETWEEN: f32 = 3.0;
+pub const NUM_INSTANCES_PER_ROW: u32 = 100;
+pub const SPACE_BETWEEN: f32 = 1.9;
 pub const WAVE_AMPLITUIDE: f32 = 4.0;
 
 // MAIN FUNCTION
@@ -23,7 +23,12 @@ fn main() {
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new().build(&event_loop).unwrap();
 
-    let mut state = pollster::block_on(state::State::new(&window, "default", "cube"));
+    let mut state = pollster::block_on(state::State::new(
+        &window,
+        "default",
+        "cube",
+        Some("cobble"),
+    ));
 
     event_loop.run(move |event, _, control_flow| match event {
         Event::WindowEvent {
