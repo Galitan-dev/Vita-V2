@@ -16,3 +16,5 @@ Cargo.lock
 
 # Linters
 node_modules
+
+/.vscode
