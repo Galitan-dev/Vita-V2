@@ -23,16 +23,6 @@ use winit::window::Window;
 
 use self::helpers::read_to_bytes;
 
-// CONSTANTS
-
-#[rustfmt::skip]
-pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::new(
-    1.0, 0.0, 0.0, 0.0,
-    0.0, 1.0, 0.0, 0.0,
-    0.0, 0.0, 0.5, 0.0,
-    0.0, 0.0, 0.5, 1.0,
-);
-
 // STRUCTURES
 
 pub struct State {
@@ -43,10 +33,11 @@ pub struct State {
     size: winit::dpi::PhysicalSize<u32>,   // Needed to draw in the good dimensions/resolutions
     render_pipeline: wgpu::RenderPipeline, // Actions to perfrom when rendering
     camera: camera::Camera,                // The camera needed to control the view point
+    projection: camera::Projection,
     camera_uniform: camera::CameraUniform,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
-    camera_controller: camera::CameraController,
+    pub camera_controller: camera::CameraController,
     instances: Vec<instance::Instance>,
     instance_buffer: wgpu::Buffer,
     depth_texture: texture::Texture,
@@ -59,7 +50,6 @@ pub struct State {
     // This parts should be removed when we start creating the API
     background_color: wgpu::Color,
     perlin: Perlin,
-    color_gaps: [f64; 3],
     start: Instant,
     debug_material: Option<model::Material>,
 }
@@ -160,21 +150,14 @@ impl State {
 
         let res_dir = path::Path::new(env!("OUT_DIR")).join("res");
 
-        let camera = camera::Camera {
-            // position the camera one unit up and 2 units back
-            // +z is out of the screen
-            eye: (0.0, 1.0, 2.0).into(),
-            // have it look at the origin
-            target: (0.0, 0.0, 0.0).into(),
-            // which way is "up"
-            up: cgmath::Vector3::unit_y(),
-            aspect: config.width as f32 / config.height as f32,
-            fovy: 45.0,
-            znear: 0.1,
-            zfar: 100.0,
-        };
+        let camera = camera::Camera::new((0.0, 5.0, 10.0), cgmath::Deg(-90.0), cgmath::Deg(-20.0));
+        let projection =
+            camera::Projection::new(config.width, config.height, cgmath::Deg(45.0), 0.1, 100.0);
+        let camera_controller = camera::CameraController::new(4.0, 0.4);
 
         let mut camera_uniform = camera::CameraUniform::new();
+
+        camera_uniform.update_view_proj(&camera, &projection);
 
         let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Camera Buffer"),
@@ -205,10 +188,6 @@ impl State {
             }],
             label: Some("camera_bind_group"),
         });
-
-        let camera_controller = camera::CameraController::new(0.2);
-
-        camera_uniform.update_view_proj(&camera);
 
         let obj_model = model::Model::load(
             &device,
@@ -342,7 +321,6 @@ impl State {
         };
 
         let perlin = Perlin::new();
-        let color_gaps = rand::random();
         let start = Instant::now();
 
         let debug_material = debug_material_name.map(|material_name| {
@@ -396,6 +374,7 @@ impl State {
             size,
             render_pipeline,
             camera,
+            projection,
             camera_uniform,
             camera_buffer,
             camera_bind_group,
@@ -411,7 +390,6 @@ impl State {
 
             background_color,
             perlin,
-            color_gaps,
             start,
             debug_material,
         }
@@ -423,38 +401,35 @@ impl State {
             self.config.width = new_size.width;
             self.config.height = new_size.height;
             self.surface.configure(&self.device, &self.config);
+            self.projection.resize(new_size.width, new_size.height);
             self.depth_texture =
                 texture::Texture::create_depth_texture(&self.device, &self.config, "depth_texture");
         }
     }
 
     pub fn input(&mut self, event: &WindowEvent) -> bool {
-        if self.camera_controller.process_events(event) {
-            return true;
-        }
-
         match event {
-            WindowEvent::CursorMoved { position, .. } => {
-                let (x, y) = (
-                    position.x / self.size.width as f64,
-                    position.y / self.size.height as f64,
-                );
-                self.background_color = wgpu::Color {
-                    r: self.perlin.get([x, y, self.color_gaps[0]]).abs(),
-                    g: self.perlin.get([x, y, self.color_gaps[1]]).abs(),
-                    b: self.perlin.get([x, y, self.color_gaps[2]]).abs(),
-                    a: 1.,
-                };
-
+            WindowEvent::KeyboardInput {
+                input:
+                    KeyboardInput {
+                        virtual_keycode: Some(key),
+                        state,
+                        ..
+                    },
+                ..
+            } => self.camera_controller.process_keyboard(*key, *state),
+            WindowEvent::MouseWheel { delta, .. } => {
+                self.camera_controller.process_scroll(delta);
                 true
             }
             _ => false,
         }
     }
 
-    pub fn update(&mut self) {
-        self.camera_controller.update_camera(&mut self.camera);
-        self.camera_uniform.update_view_proj(&self.camera);
+    pub fn update(&mut self, dt: instant::Duration) {
+        self.camera_controller.update_camera(&mut self.camera, dt);
+        self.camera_uniform
+            .update_view_proj(&self.camera, &self.projection);
         self.queue.write_buffer(
             &self.camera_buffer,
             0,
@@ -501,10 +476,12 @@ impl State {
             });
 
         let old_position: cgmath::Vector3<_> = self.light_uniform.position.into();
-        self.light_uniform.position =
-            (cgmath::Quaternion::from_axis_angle((0.0, 1.0, 0.0).into(), cgmath::Deg(1.0))
-                * old_position)
-                .into();
+        self.light_uniform.position = (cgmath::Quaternion::from_axis_angle(
+            (0.0, 1.0, 0.0).into(),
+            cgmath::Deg(60.0 * dt.as_secs_f32()),
+        ) * old_position)
+            .into();
+
         self.queue.write_buffer(
             &self.light_buffer,
             0,
