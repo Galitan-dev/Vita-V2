@@ -23,7 +23,7 @@ fn main() {
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new().build(&event_loop).unwrap();
 
-    let mut state = pollster::block_on(state::State::new(&window, "default", "cube", None));
+    let mut state = pollster::block_on(state::State::new(&window, "debug", "cube", None));
 
     let mut last_render_time = instant::Instant::now();
 

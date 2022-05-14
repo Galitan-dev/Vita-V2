@@ -6,23 +6,23 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-image = "0.24.0"
+image = "0.24.1"
 winit = "0.26.1"
 cgmath = "0.18.0"
 env_logger = "0.9.0"
-log = "0.4.14"
+log = "0.4.16"
 wgpu = "0.12.0"
 pollster = "0.2.5"
-bytemuck = { version = "1.7.3", features = [ "derive" ] }
-anyhow = "1.0.53"
-tobj = "3.2.0"
-instant = "0.1"
+bytemuck = { version = "1.9.1", features = [ "derive" ] }
+anyhow = "1.0.56"
+tobj = "3.2.2"
+instant = "0.1.12"
 
 # Optional dependencies
 noise = "0.7.0"
 rand = "0.8.5"
 
 [build-dependencies]
-anyhow = "1.0.53"
+anyhow = "1.0.56"
 fs_extra = "1.2.0"
 glob = "0.3.0"
