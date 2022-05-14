@@ -1,20 +1,11 @@
-// MODULES
-
-mod state;
-
 // IMPORTS
 
+use vita::state;
 use winit::{
     event::{DeviceEvent, ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
     window::WindowBuilder,
 };
-
-// CONSTANTS
-
-pub const NUM_INSTANCES_PER_ROW: u32 = 100;
-pub const SPACE_BETWEEN: f32 = 1.9;
-pub const WAVE_AMPLITUIDE: f32 = 4.0;
 
 // MAIN FUNCTION
 

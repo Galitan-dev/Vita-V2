@@ -5,6 +5,14 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[[bin]]
+name = "vita-example"
+path = "src/bin/main.rs"
+
+[lib]
+name = "vita"
+path = "src/lib/mod.rs"
+
 [dependencies]
 image = "0.24.1"
 winit = "0.26.1"

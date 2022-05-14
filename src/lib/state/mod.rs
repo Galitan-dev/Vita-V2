@@ -23,6 +23,10 @@ use winit::window::Window;
 
 use self::helpers::read_to_bytes;
 
+pub const NUM_INSTANCES_PER_ROW: u32 = 100;
+pub const SPACE_BETWEEN: f32 = 1.9;
+pub const WAVE_AMPLITUIDE: f32 = 4.0;
+
 // STRUCTURES
 
 pub struct State {
@@ -197,9 +201,9 @@ impl State {
         )
         .expect(&("Could not load `".to_owned() + model_name + "` model"));
 
-        let instances = (0..crate::NUM_INSTANCES_PER_ROW)
+        let instances = (0..NUM_INSTANCES_PER_ROW)
             .flat_map(|_| {
-                (0..crate::NUM_INSTANCES_PER_ROW).map(move |_| instance::Instance {
+                (0..NUM_INSTANCES_PER_ROW).map(move |_| instance::Instance {
                     position: cgmath::Vector3::zero(),
                     rotation: cgmath::Quaternion::zero(),
                 })
@@ -438,18 +442,16 @@ impl State {
 
         let perlin = self.perlin;
         let elapsed = self.start.elapsed().as_millis() as f64 / 1000000.0;
-        self.instances = (0..crate::NUM_INSTANCES_PER_ROW)
+        self.instances = (0..NUM_INSTANCES_PER_ROW)
             .flat_map(|z| {
-                (0..crate::NUM_INSTANCES_PER_ROW).map(move |x| {
+                (0..NUM_INSTANCES_PER_ROW).map(move |x| {
                     let position = cgmath::Vector3 {
-                        x: crate::SPACE_BETWEEN
-                            * (x as f32 - crate::NUM_INSTANCES_PER_ROW as f32 / 2.0),
+                        x: SPACE_BETWEEN * (x as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0),
                         y: (perlin.get([x as f64 / 10.0, z as f64 / 10.0, elapsed]) as f32
-                            * crate::WAVE_AMPLITUIDE)
+                            * WAVE_AMPLITUIDE)
                             .round()
-                            * crate::SPACE_BETWEEN,
-                        z: crate::SPACE_BETWEEN
-                            * (z as f32 - crate::NUM_INSTANCES_PER_ROW as f32 / 2.0),
+                            * SPACE_BETWEEN,
+                        z: SPACE_BETWEEN * (z as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0),
                     };
 
                     let rotation = cgmath::Quaternion::from_axis_angle(
