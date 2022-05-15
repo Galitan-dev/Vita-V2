@@ -11,7 +11,7 @@ path = "src/bin/main.rs"
 
 [lib]
 name = "vita"
-path = "src/lib/mod.rs"
+path = "src/lib/lib.rs"
 
 [dependencies]
 image = "0.24.1"

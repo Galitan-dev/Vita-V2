@@ -19,7 +19,8 @@ use std::{env, path};
 use wgpu::util::DeviceExt;
 use winit::dpi::PhysicalSize;
 use winit::event::*;
-use winit::window::Window;
+use winit::event_loop::ControlFlow;
+use winit::window::{Window, WindowId};
 
 use self::helpers::read_to_bytes;
 
@@ -27,9 +28,39 @@ pub const NUM_INSTANCES_PER_ROW: u32 = 100;
 pub const SPACE_BETWEEN: f32 = 1.9;
 pub const WAVE_AMPLITUIDE: f32 = 4.0;
 
+#[macro_export]
+macro_rules! listen {
+    ($e:ident, $v:ident, $w:ident, $ev:ident, $h:tt) => {
+        $e.run(move |event, _, control_flow| {
+            $v.handle_or(
+                event,
+                control_flow,
+                || $w.request_redraw(),
+                |event| {
+                    let $ev = event;
+                    $h();
+                },
+            )
+        });
+    };
+    (event_loop = $e:ident, vita = $v:ident, window = $w:ident, $ev:ident, $h:tt) => {
+        $e.run(move |event, _, control_flow| {
+            $v.handle_or(
+                event,
+                control_flow,
+                || $w.request_redraw(),
+                |event| {
+                    let $ev = event;
+                    $h();
+                },
+            )
+        });
+    };
+}
+
 // STRUCTURES
 
-pub struct State {
+pub struct Vita {
     surface: wgpu::Surface,                // Where to draw
     device: wgpu::Device,                  // Information about the device and its GPU/CPU
     queue: wgpu::Queue,                    // A sort of memory queue
@@ -50,6 +81,8 @@ pub struct State {
     light_buffer: wgpu::Buffer,
     light_bind_group: wgpu::BindGroup,
     light_render_pipeline: wgpu::RenderPipeline,
+    window_id: WindowId,
+    last_render_time: Instant,
 
     // This parts should be removed when we start creating the API
     background_color: wgpu::Color,
@@ -60,7 +93,7 @@ pub struct State {
 
 // IMPLEMENTATIONS
 
-impl State {
+impl Vita {
     // Creating some of the wgpu types requires async code
     pub async fn new(
         window: &Window,
@@ -391,6 +424,8 @@ impl State {
             light_buffer,
             light_bind_group,
             light_render_pipeline,
+            window_id: window.id(),
+            last_render_time: Instant::now(),
 
             background_color,
             perlin,
@@ -409,6 +444,80 @@ impl State {
             self.depth_texture =
                 texture::Texture::create_depth_texture(&self.device, &self.config, "depth_texture");
         }
+    }
+
+    pub fn handle_or<F, E>(
+        &mut self,
+        event: Event<()>,
+        control_flow: &mut ControlFlow,
+        request_redraw: F,
+        then: E,
+    ) where
+        F: Fn(),
+        E: Fn(Event<()>),
+    {
+        if !match event {
+            Event::MainEventsCleared => {
+                request_redraw();
+                true
+            }
+            Event::DeviceEvent {
+                    event: DeviceEvent::MouseMotion{ delta, },
+                    .. // We're not using device_id currently
+                } => {
+                    self.camera_controller.process_mouse(delta.0, delta.1);
+                    true
+                },
+            Event::WindowEvent {
+                    ref event,
+                    window_id,
+                } if window_id == self.window_id => {
+                    self.input(event) || match event {
+                        #[cfg(not(target_arch="wasm32"))]
+                        WindowEvent::CloseRequested
+                        | WindowEvent::KeyboardInput {
+                            input:
+                                KeyboardInput {
+                                    state: ElementState::Pressed,
+                                    virtual_keycode: Some(VirtualKeyCode::Escape),
+                                    ..
+                                },
+                            ..
+                        } => {
+                            *control_flow = ControlFlow::Exit;
+                            true
+                        },
+                        WindowEvent::Resized(physical_size) => {
+                            self.resize(*physical_size);
+                            true
+                        }
+                        WindowEvent::ScaleFactorChanged { new_inner_size, .. } => {
+                            self.resize(**new_inner_size);
+                            true
+                        }
+                        _ => false
+                    }
+                }
+            Event::RedrawRequested(window_id) if window_id == self.window_id => {
+                let now = instant::Instant::now();
+                    let dt = now - self.last_render_time;
+                    self.last_render_time = now;
+                    self.update(dt);
+                match self.render() {
+                    Ok(_) => {}
+                    // Reconfigure the surface if lost
+                    Err(wgpu::SurfaceError::Lost) => self.resize(self.size()),
+                    // The system is out of memory, we should probably quit
+                    Err(wgpu::SurfaceError::OutOfMemory) => *control_flow = ControlFlow::Exit,
+                    // All other errors (Outdated, Timeout) should be resolved by the next frame
+                    Err(e) => println!("{:?}", e),
+                };
+                true
+            }
+           _ => false,
+        } {
+            then(event);
+        };
     }
 
     pub fn input(&mut self, event: &WindowEvent) -> bool {

@@ -1,9 +1,9 @@
 // IMPORTS
 
-use vita::state;
+use vita::{listen, Vita};
 use winit::{
-    event::{DeviceEvent, ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent},
-    event_loop::{ControlFlow, EventLoop},
+    event::{ElementState, Event, KeyboardInput, WindowEvent},
+    event_loop::EventLoop,
     window::WindowBuilder,
 };
 
@@ -14,58 +14,32 @@ fn main() {
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new().build(&event_loop).unwrap();
 
-    let mut state = pollster::block_on(state::State::new(&window, "default", "cube", None));
+    let mut vita = pollster::block_on(Vita::new(&window, "default", "cube", None));
 
-    let mut last_render_time = instant::Instant::now();
-
-    event_loop.run(move |event, _, control_flow| match event {
-        Event::DeviceEvent {
-                event: DeviceEvent::MouseMotion{ delta, },
-                .. // We're not using device_id currently
-            } => state.camera_controller.process_mouse(delta.0, delta.1),
-        Event::WindowEvent {
+    listen!(
+        event_loop,
+        vita,
+        window,
+        event,
+        (|| match event {
+            Event::WindowEvent {
                 ref event,
                 window_id,
-            } if window_id == window.id() && !state.input(event) => {
+            } if window_id == window.id() => {
                 match event {
-                    #[cfg(not(target_arch="wasm32"))]
-                    WindowEvent::CloseRequested
-                    | WindowEvent::KeyboardInput {
+                    WindowEvent::KeyboardInput {
                         input:
                             KeyboardInput {
                                 state: ElementState::Pressed,
-                                virtual_keycode: Some(VirtualKeyCode::Escape),
+                                virtual_keycode,
                                 ..
                             },
                         ..
-                    } => *control_flow = ControlFlow::Exit,
-                    WindowEvent::Resized(physical_size) => {
-                        state.resize(*physical_size);
-                    }
-                    WindowEvent::ScaleFactorChanged { new_inner_size, .. } => {
-                        state.resize(**new_inner_size);
-                    }
-                    _ => {}
+                    } if virtual_keycode.is_some() => println!("{:?}", virtual_keycode.unwrap()),
+                    _ => (),
                 }
             }
-        Event::RedrawRequested(window_id) if window_id == window.id() => {
-            let now = instant::Instant::now();
-                let dt = now - last_render_time;
-                last_render_time = now;
-                state.update(dt);
-            match state.render() {
-                Ok(_) => {}
-                // Reconfigure the surface if lost
-                Err(wgpu::SurfaceError::Lost) => state.resize(state.size()),
-                // The system is out of memory, we should probably quit
-                Err(wgpu::SurfaceError::OutOfMemory) => *control_flow = ControlFlow::Exit,
-                // All other errors (Outdated, Timeout) should be resolved by the next frame
-                Err(e) => eprintln!("{:?}", e),
-            }
-        }
-        Event::MainEventsCleared => {
-            window.request_redraw();
-        }
-        _ => {}
-    });
+            _ => (),
+        })
+    );
 }
