@@ -16,6 +16,7 @@ pub struct Texture {
 impl Texture {
     pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
+    #[allow(dead_code)]
     pub fn from_bytes(
         device: &wgpu::Device,
         queue: &wgpu::Queue,

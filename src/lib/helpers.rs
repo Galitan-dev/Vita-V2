@@ -6,6 +6,7 @@ use std::{
 
 // FUNCTIONS
 
+#[allow(dead_code)]
 pub fn read_to_bytes<P>(path: P) -> io::Result<Vec<u8>>
 where
     P: AsRef<Path>,

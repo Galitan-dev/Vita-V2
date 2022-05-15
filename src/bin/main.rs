@@ -14,7 +14,9 @@ fn main() {
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new().build(&event_loop).unwrap();
 
-    let mut vita = pollster::block_on(Vita::new(&window, "default", "cube", None));
+    let mut vita = pollster::block_on(Vita::new(&window, "default"));
+
+    vita.add_object("cube");
 
     listen!(
         event_loop,

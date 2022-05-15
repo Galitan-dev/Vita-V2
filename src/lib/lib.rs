@@ -2,17 +2,18 @@
 
 mod camera;
 mod helpers;
-mod instance;
 mod light;
-mod model;
-mod texture;
+mod object;
 
 // IMPORTS
 
 use cgmath::prelude::*;
 use light::DrawLight;
-use model::{DrawModel, Vertex};
-use noise::{NoiseFn, Perlin};
+use object::{
+    instance, model,
+    model::{DrawModel, Vertex},
+    texture,
+};
 use std::fs::read_to_string;
 use std::time::Instant;
 use std::{env, path};
@@ -21,8 +22,6 @@ use winit::dpi::PhysicalSize;
 use winit::event::*;
 use winit::event_loop::ControlFlow;
 use winit::window::{Window, WindowId};
-
-use self::helpers::read_to_bytes;
 
 pub const NUM_INSTANCES_PER_ROW: u32 = 100;
 pub const SPACE_BETWEEN: f32 = 1.9;
@@ -72,35 +71,26 @@ pub struct Vita {
     camera_uniform: camera::CameraUniform,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
-    pub camera_controller: camera::CameraController,
-    instances: Vec<instance::Instance>,
-    instance_buffer: wgpu::Buffer,
+    camera_controller: camera::CameraController,
     depth_texture: texture::Texture,
-    obj_model: model::Model,
+    texture_bind_group_layout: wgpu::BindGroupLayout,
     light_uniform: light::LightUniform,
     light_buffer: wgpu::Buffer,
     light_bind_group: wgpu::BindGroup,
     light_render_pipeline: wgpu::RenderPipeline,
     window_id: WindowId,
     last_render_time: Instant,
+    objects: Vec<object::Object>,
 
     // This parts should be removed when we start creating the API
     background_color: wgpu::Color,
-    perlin: Perlin,
-    start: Instant,
-    debug_material: Option<model::Material>,
 }
 
 // IMPLEMENTATIONS
 
 impl Vita {
     // Creating some of the wgpu types requires async code
-    pub async fn new(
-        window: &Window,
-        shader_name: &str,
-        model_name: &str,
-        debug_material_name: Option<&str>,
-    ) -> Self {
+    pub async fn new(window: &Window, shader_name: &str) -> Self {
         let size = window.inner_size();
 
         // The instance is a handle to our GPU
@@ -226,34 +216,6 @@ impl Vita {
             label: Some("camera_bind_group"),
         });
 
-        let obj_model = model::Model::load(
-            &device,
-            &queue,
-            &texture_bind_group_layout,
-            res_dir.join("models").join(model_name).join("model.obj"),
-        )
-        .expect(&("Could not load `".to_owned() + model_name + "` model"));
-
-        let instances = (0..NUM_INSTANCES_PER_ROW)
-            .flat_map(|_| {
-                (0..NUM_INSTANCES_PER_ROW).map(move |_| instance::Instance {
-                    position: cgmath::Vector3::zero(),
-                    rotation: cgmath::Quaternion::zero(),
-                })
-            })
-            .collect::<Vec<_>>();
-
-        let instance_data = instances
-            .iter()
-            .map(instance::Instance::to_raw)
-            .collect::<Vec<_>>();
-
-        let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Instance Buffer"),
-            contents: bytemuck::cast_slice(&instance_data),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-
         let light_uniform = light::LightUniform {
             position: [2.0, 2.0, 2.0],
             _padding: 0,
@@ -357,52 +319,6 @@ impl Vita {
             a: 1.0,
         };
 
-        let perlin = Perlin::new();
-        let start = Instant::now();
-
-        let debug_material = debug_material_name.map(|material_name| {
-            let diffuse_bytes = read_to_bytes(
-                res_dir
-                    .join("materials")
-                    .join(material_name)
-                    .join("diffuse.png"),
-            )
-            .expect("Could not read debug material diffuse");
-
-            let normal_bytes = read_to_bytes(
-                res_dir
-                    .join("materials")
-                    .join(material_name)
-                    .join("normal.png"),
-            )
-            .expect("Could not read debug material normal");
-
-            let diffuse_texture = texture::Texture::from_bytes(
-                &device,
-                &queue,
-                &diffuse_bytes,
-                "Debug Material Diffuse",
-                false,
-            )
-            .unwrap();
-            let normal_texture = texture::Texture::from_bytes(
-                &device,
-                &queue,
-                &normal_bytes,
-                "Debug Material Normal",
-                true,
-            )
-            .unwrap();
-
-            model::Material::new(
-                &device,
-                "alt-material",
-                diffuse_texture,
-                normal_texture,
-                &texture_bind_group_layout,
-            )
-        });
-
         Self {
             surface,
             device,
@@ -416,25 +332,21 @@ impl Vita {
             camera_buffer,
             camera_bind_group,
             camera_controller,
-            instances,
-            instance_buffer,
             depth_texture,
-            obj_model,
+            texture_bind_group_layout,
             light_uniform,
             light_buffer,
             light_bind_group,
             light_render_pipeline,
             window_id: window.id(),
             last_render_time: Instant::now(),
+            objects: vec![],
 
             background_color,
-            perlin,
-            start,
-            debug_material,
         }
     }
 
-    pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
+    fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
         if new_size.width > 0 && new_size.height > 0 {
             self.size = new_size;
             self.config.width = new_size.width;
@@ -520,7 +432,7 @@ impl Vita {
         };
     }
 
-    pub fn input(&mut self, event: &WindowEvent) -> bool {
+    fn input(&mut self, event: &WindowEvent) -> bool {
         match event {
             WindowEvent::KeyboardInput {
                 input:
@@ -539,7 +451,7 @@ impl Vita {
         }
     }
 
-    pub fn update(&mut self, dt: instant::Duration) {
+    fn update(&mut self, dt: instant::Duration) {
         self.camera_controller.update_camera(&mut self.camera, dt);
         self.camera_uniform
             .update_view_proj(&self.camera, &self.projection);
@@ -548,43 +460,6 @@ impl Vita {
             0,
             bytemuck::cast_slice(&[self.camera_uniform]),
         );
-
-        let perlin = self.perlin;
-        let elapsed = self.start.elapsed().as_millis() as f64 / 1000000.0;
-        self.instances = (0..NUM_INSTANCES_PER_ROW)
-            .flat_map(|z| {
-                (0..NUM_INSTANCES_PER_ROW).map(move |x| {
-                    let position = cgmath::Vector3 {
-                        x: SPACE_BETWEEN * (x as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0),
-                        y: (perlin.get([x as f64 / 10.0, z as f64 / 10.0, elapsed]) as f32
-                            * WAVE_AMPLITUIDE)
-                            .round()
-                            * SPACE_BETWEEN,
-                        z: SPACE_BETWEEN * (z as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0),
-                    };
-
-                    let rotation = cgmath::Quaternion::from_axis_angle(
-                        cgmath::Vector3::unit_z(),
-                        cgmath::Deg(0.0),
-                    );
-
-                    instance::Instance { position, rotation }
-                })
-            })
-            .collect::<Vec<_>>();
-
-        let instance_data = self
-            .instances
-            .iter()
-            .map(instance::Instance::to_raw)
-            .collect::<Vec<_>>();
-        self.instance_buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Instance Buffer"),
-                contents: bytemuck::cast_slice(&instance_data),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
 
         let old_position: cgmath::Vector3<_> = self.light_uniform.position.into();
         self.light_uniform.position = (cgmath::Quaternion::from_axis_angle(
@@ -600,7 +475,16 @@ impl Vita {
         );
     }
 
-    pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
+    pub fn add_object(&mut self, model_name: &str) {
+        self.objects.push(object::Object::new(
+            model_name,
+            &self.device,
+            &self.queue,
+            &self.texture_bind_group_layout,
+        ));
+    }
+
+    fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
         let output = self.surface.get_current_texture()?;
         let view = output
             .texture
@@ -631,28 +515,20 @@ impl Vita {
             }),
         });
 
-        render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+        for object in &self.objects {
+            render_pass.set_vertex_buffer(1, object.instance_buffer.slice(..));
 
-        render_pass.set_pipeline(&self.light_render_pipeline);
-        render_pass.draw_light_model(
-            &self.obj_model,
-            &self.camera_bind_group,
-            &self.light_bind_group,
-        );
-
-        render_pass.set_pipeline(&self.render_pipeline);
-        if let Some(debug_material) = &self.debug_material {
-            render_pass.draw_model_instanced_with_material(
-                &self.obj_model,
-                debug_material,
-                0..self.instances.len() as u32,
+            render_pass.set_pipeline(&self.light_render_pipeline);
+            render_pass.draw_light_model(
+                &object.model,
                 &self.camera_bind_group,
                 &self.light_bind_group,
             );
-        } else {
+
+            render_pass.set_pipeline(&self.render_pipeline);
             render_pass.draw_model_instanced(
-                &self.obj_model,
-                0..self.instances.len() as u32,
+                &object.model,
+                0..object.instances.len() as u32,
                 &self.camera_bind_group,
                 &self.light_bind_group,
             );

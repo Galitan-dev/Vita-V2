@@ -5,6 +5,7 @@
   - [x] Make it as a library + binary
   - [x] Vita Structure
   - [x] Event Handler
-  - [ ] Object Collection (With instances)
+  - [x] Object Collection (With instances)
+  - [ ] Object Instances Modifications
   - [ ] Detach Camera
 - [ ] Work on the game
